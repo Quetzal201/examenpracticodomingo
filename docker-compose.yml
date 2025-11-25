@@ -1,0 +1,14 @@
+docker run --name turso-dev -d \
+  -e TURSO_DATABASE_URL=libsql://localhost:8000 \
+  -e TURSO_AUTH_TOKEN=dev-token \
+  -p 8000:8000 \
+  turso/turso:latest
+
+# Para detener:
+# docker stop turso-dev
+
+# Para ver logs:
+# docker logs turso-dev
+
+# Nota: Esto es solo para desarrollo local
+# Para producción usar: https://turso.tech

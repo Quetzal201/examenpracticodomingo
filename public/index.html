@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1a1a1a" />
+  <meta name="description" content="Aplicación Web Progresiva para gestión de pedidos" />
+  <title>Gestor de Pedidos - PWA</title>
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/img/icon-192.png" />
+  <link rel="icon" type="image/png" href="/img/icon-192.png" />
+  
+  <!-- CSS -->
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Notificación de estado (offline/online) -->
+  <div id="toast" class="toast"></div>
+
+  <!-- Modal CRUD -->
+  <div id="modalBackdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">Modal</h2>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" onclick="closeModal()">Cancelar</button>
+        <button class="btn btn-outline-primary" id="modalActionBtn" onclick="handleModalAction()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts en orden correcto -->
+  <script>
+    // Funciones globales de utilidad
+    function showToast(message, type = 'info', duration = 3000) {
+      const toast = document.getElementById('toast');
+      let icon = '📱';
+      let className = type;
+
+      if (type === 'offline') {
+        icon = '🔴';
+      } else if (type === 'online') {
+        icon = '🟢';
+      } else if (type === 'success') {
+        icon = '✓';
+      } else if (type === 'error') {
+        icon = '✗';
+      } else if (type === 'warning') {
+        icon = '⚠';
+      } else if (type === 'loading') {
+        icon = '<div class="spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #f59e0b; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>';
+        duration = 0; // No cerrar automáticamente
+      }
+
+      toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-message">${message}</span>
+      `;
+      toast.className = `toast show ${className}`;
+
+      if (duration > 0) {
+        setTimeout(() => {
+          toast.classList.remove('show');
+        }, duration);
+      }
+    }
+
+    function showModal(title, content, actionText = 'Confirmar', onAction = null) {
+      const backdrop = document.getElementById('modalBackdrop');
+      const modalTitle = document.getElementById('modalTitle');
+      const modalBody = document.getElementById('modalBody');
+      const actionBtn = document.getElementById('modalActionBtn');
+
+      modalTitle.textContent = title;
+      modalBody.innerHTML = content;
+      actionBtn.textContent = actionText;
+
+      window.modalActionCallback = onAction;
+
+      backdrop.classList.remove('hidden');
+    }
+
+    function closeModal() {
+      const backdrop = document.getElementById('modalBackdrop');
+      backdrop.classList.add('hidden');
+      window.modalActionCallback = null;
+    }
+
+    function handleModalAction() {
+      if (window.modalActionCallback) {
+        window.modalActionCallback();
+      }
+    }
+
+    function formatCurrency(value) {
+      return new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency: 'MXN',
+      }).format(value);
+    }
+
+    function formatDate(dateString) {
+      return new Date(dateString).toLocaleDateString('es-ES', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    // Hacer funciones disponibles globalmente
+    window.showToast = showToast;
+    window.showModal = showModal;
+    window.closeModal = closeModal;
+    window.handleModalAction = handleModalAction;
+    window.formatCurrency = formatCurrency;
+    window.formatDate = formatDate;
+  </script>
+  
+  <script src="/js/utils.js"></script>
+  <script src="/js/offline-manager.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/app.js"></script>
+  
+  <!-- Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        console.log('✓ Service Worker registrado');
+      }).catch(err => {
+        console.error('✗ Error registrando Service Worker:', err);
+      });
+    }
+  </script>
+</body>
+</html>
