@@ -54,9 +54,6 @@
         icon = '✗';
       } else if (type === 'warning') {
         icon = '⚠';
-      } else if (type === 'loading') {
-        icon = '<div class="spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #f59e0b; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>';
-        duration = 0; // No cerrar automáticamente
       }
 
       toast.innerHTML = `

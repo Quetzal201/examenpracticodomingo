@@ -12,6 +12,25 @@ import { generateToken, hashPassword, comparePassword, authMiddleware } from "./
 
 const router = express.Router();
 
+// Helper para convertir BigInt a Number/string en filas devueltas por la DB
+function sanitizeRow(row) {
+  const out = {};
+  for (const k of Object.keys(row)) {
+    const v = row[k];
+    if (typeof v === 'bigint') {
+      // Convertir a Number cuando sea seguro; usar String si prefieres
+      out[k] = Number(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function sanitizeRows(rows) {
+  return (rows || []).map(r => sanitizeRow(r));
+}
+
 // ========================
 // RUTAS DE AUTENTICACIÓN
 // ========================
@@ -37,14 +56,17 @@ router.post("/api/register", async (req, res) => {
     // Crear usuario
     const result = await createUser(usuario, correo, hashedPassword);
 
+    // Obtener ID serializable
+    const newUserId = Number(result.lastInsertRowid);
+
     // Generar token
-    const token = generateToken(result.lastInsertRowid);
+    const token = generateToken(newUserId);
 
     res.json({
       success: true,
       token,
       user: {
-        id: result.lastInsertRowid,
+        id: newUserId,
         usuario,
         correo,
       },
@@ -75,14 +97,15 @@ router.post("/api/login", async (req, res) => {
       return res.status(401).json({ error: "Credenciales inválidas" });
     }
 
-    // Generar token
-    const token = generateToken(user.id);
+    // Generar token (asegurarse que el id sea serializable)
+    const userId = Number(user.id);
+    const token = generateToken(userId);
 
     res.json({
       success: true,
       token,
       user: {
-        id: user.id,
+        id: userId,
         usuario: user.usuario,
         correo: user.correo,
       },
@@ -100,7 +123,9 @@ router.post("/api/login", async (req, res) => {
 router.get("/api/productos", authMiddleware, async (req, res) => {
   try {
     const productos = await getProductosByUserId(req.userId);
-    res.json({ success: true, data: productos });
+    // Sanitizar filas antes de enviar
+    const safe = sanitizeRows(productos);
+    res.json({ success: true, data: safe });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -117,10 +142,12 @@ router.post("/api/productos", authMiddleware, async (req, res) => {
 
     const result = await createProducto(nombre, categoria, precio, existencias, req.userId);
 
+    const newId = Number(result.lastInsertRowid);
+
     res.json({
       success: true,
       data: {
-        id: result.lastInsertRowid,
+        id: newId,
         nombre,
         categoria,
         precio,
@@ -152,7 +179,7 @@ router.put("/api/productos/:id", authMiddleware, async (req, res) => {
 
     res.json({
       success: true,
-      data: { id, nombre, categoria, precio, existencias },
+      data: { id: Number(id), nombre, categoria, precio, existencias },
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

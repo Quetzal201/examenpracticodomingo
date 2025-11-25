@@ -7,6 +7,12 @@ class OfflineManager {
     this.pendingTasks = [];
     this.loadPendingTasks();
     this.setupNetworkListeners();
+
+    // Si ya estamos online al inicializar, intentar sincronizar automáticamente
+    if (navigator.onLine && this.hasPendingTasks()) {
+      // Deferir para que el resto de la app inicialice
+      setTimeout(() => this.handleOnline(), 500);
+    }
   }
 
   setupNetworkListeners() {
@@ -25,6 +31,15 @@ class OfflineManager {
   }
 
   handleOnline() {
+    // Mostrar mensajes de aviso para cada tarea pendiente (estado en espera)
+    const tasks = this.getPendingTasks();
+    tasks.forEach((t) => {
+      const action = t.action;
+      if (action === 'CREATE') showToast('Creación de producto en espera', 'success', 2500);
+      else if (action === 'UPDATE') showToast('Modificación de producto en espera', 'success', 2500);
+      else if (action === 'DELETE') showToast('Eliminación de producto en espera', 'success', 2500);
+    });
+
     showToast('Conectado - Sincronizando cambios...', 'success', 2000);
     document.body.classList.remove('offline-mode');
     this.syncPendingTasks();
@@ -62,11 +77,16 @@ class OfflineManager {
   async syncPendingTasks() {
     if (this.pendingTasks.length === 0) return;
 
-    for (const task of this.pendingTasks) {
+    // Iterar sobre copia para permitir remoción durante la sincronización
+    const tasks = [...this.pendingTasks];
+    for (const task of tasks) {
       try {
+        console.log('Intentando sincronizar tarea', task.id, task.action);
         await this.executePendingTask(task);
         this.removePendingTask(task.id);
+        console.log('Tarea sincronizada correctamente', task.id);
       } catch (error) {
+        console.error('Error al sincronizar tarea', task.id, error);
         task.retries++;
         if (task.retries > 3) {
           showToast(`Error sincronizando ${task.action}`, 'error', 5000);
@@ -89,42 +109,69 @@ class OfflineManager {
 
   async executePendingTask(task) {
     const { action, data } = task;
+    const { endpoint, method, data: requestData } = data;
 
-    try {
-      switch (action) {
-        case 'CREATE':
-          return await fetch('/api/productos', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-            },
-            body: JSON.stringify(data.data),
-          }).then(r => r.json());
+    // Construir URL completa (normalizar si el endpoint contiene ya /api)
+    let url;
+    if (String(endpoint).startsWith('/api')) url = `${window.location.origin}${endpoint}`;
+    else url = `${window.location.origin}/api${endpoint}`;
 
-        case 'UPDATE':
-          return await fetch(data.endpoint, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-            },
-            body: JSON.stringify(data.data),
-          }).then(r => r.json());
+    // Headers incluyendo autorización
+    const headers = (window.api && window.api.getHeaders && window.api.getHeaders()) || { 'Content-Type': 'application/json' };
 
-        case 'DELETE':
-          return await fetch(data.endpoint, {
-            method: 'DELETE',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-            },
-          }).then(r => r.json());
+    // Ejecutar la petición directamente con fetch para evitar re-adding a la cola
+    switch (action) {
+      case 'CREATE': {
+        const body = { ...requestData };
+        // quitar tempId antes de enviar
+        if (body.tempId) delete body.tempId;
 
-        default:
-          throw new Error('Acción desconocida');
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`CREATE failed: ${resp.status} ${txt}`);
+        }
+
+        return await resp.json();
       }
-    } catch (error) {
-      throw new Error(`Error sincronizando ${action}: ${error.message}`);
+      case 'UPDATE': {
+        const id = endpoint.split('/').pop();
+        const body = { ...requestData };
+        if (body.id) delete body.id;
+
+        const resp = await fetch(url, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`UPDATE failed: ${resp.status} ${txt}`);
+        }
+
+        return await resp.json();
+      }
+      case 'DELETE': {
+        const resp = await fetch(url, {
+          method: 'DELETE',
+          headers,
+        });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          throw new Error(`DELETE failed: ${resp.status} ${txt}`);
+        }
+
+        return await resp.json();
+      }
+      default:
+        throw new Error('Acción desconocida');
     }
   }
 
@@ -144,6 +191,26 @@ class OfflineManager {
 
   getPendingTasks() {
     return this.pendingTasks;
+  }
+
+  // Retorna un Set de IDs (tempId o id) que están afectados por tareas pendientes
+  getPendingIds() {
+    const ids = new Set();
+    for (const t of this.pendingTasks) {
+      // Estructuras posibles: t.data.data.tempId | t.data.data.id | t.data.tempId | t.data.id
+      const maybe = (t && t.data) || {};
+      const inner = maybe.data || maybe;
+      if (!inner) continue;
+      if (inner.tempId) ids.add(String(inner.tempId));
+      if (inner.id) ids.add(String(inner.id));
+      // También si endpoint incluye an id at end (/productos/123)
+      if (maybe.endpoint) {
+        const parts = String(maybe.endpoint).split('/').filter(Boolean);
+        const last = parts[parts.length - 1];
+        if (last && !isNaN(Number(last))) ids.add(String(last));
+      }
+    }
+    return ids;
   }
 
   hasPendingTasks() {

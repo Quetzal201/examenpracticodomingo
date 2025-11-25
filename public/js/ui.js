@@ -146,8 +146,11 @@ class UI {
 
   loadLocalProductos() {
     const content = document.getElementById('productosContent');
-    const stored = localStorage.getItem('serverProductos');
+    const stored = localStorage.getItem('localProductos');
     const productos = stored ? JSON.parse(stored) : [];
+
+    // Obtener IDs pendientes del offlineManager (maneja varias formas de tareas)
+    const pendingIds = (window.offlineManager && window.offlineManager.getPendingIds && window.offlineManager.getPendingIds()) || new Set();
 
     if (productos.length === 0) {
       content.innerHTML = `
@@ -174,10 +177,11 @@ class UI {
           </thead>
           <tbody>
             ${productos
-              .map(
-                (producto) => `
-              <tr id="producto-${producto.id}" style="opacity: 0.6; border-left: 3px solid #f59e0b;">
-                <td>#${producto.id}<span class="clock-icon" style="display: inline-block;"></span></td>
+              .map((producto) => {
+                const isPending = pendingIds.has(String(producto.id));
+                return `
+              <tr id="producto-${producto.id}" ${isPending ? 'style="opacity: 0.6; border-left: 3px solid #f59e0b;"' : ''}>
+                <td>#${producto.id}<span class="clock-icon" style="display: ${isPending ? 'inline-block' : 'none'};"></span></td>
                 <td>${producto.nombre}</td>
                 <td>${producto.categoria}</td>
                 <td>${window.formatCurrency(producto.precio)}</td>
@@ -193,8 +197,8 @@ class UI {
                   </div>
                 </td>
               </tr>
-            `
-              )
+            `;
+              })
               .join('')}
           </tbody>
         </table>
@@ -226,6 +230,16 @@ class UI {
         return;
       }
 
+      // Determinar IDs pendientes
+      const pending = (window.offlineManager && window.offlineManager.getPendingTasks && window.offlineManager.getPendingTasks()) || [];
+      const pendingIds = new Set();
+      pending.forEach((t) => {
+        const rd = t.data && t.data.data;
+        if (!rd) return;
+        if (t.action === 'CREATE' && rd.tempId) pendingIds.add(String(rd.tempId));
+        if ((t.action === 'UPDATE' || t.action === 'DELETE') && rd.id) pendingIds.add(String(rd.id));
+      });
+
       const tableHTML = `
         <div class="table-wrapper">
           <table>
@@ -241,10 +255,11 @@ class UI {
             </thead>
             <tbody>
               ${productos
-                .map(
-                  (producto) => `
-                <tr id="producto-${producto.id}"${producto.offline ? ' style="opacity: 0.6; border-left: 3px solid #f59e0b;"' : ''}>
-                  <td>#${producto.id}<span class="clock-icon" style="display: ${producto.offline ? 'inline-block' : 'none'};"></span></td>
+                .map((producto) => {
+                  const isPending = pendingIds.has(String(producto.id));
+                  return `
+                <tr id="producto-${producto.id}"${isPending ? ' style="opacity: 0.6; border-left: 3px solid #f59e0b;"' : ''}>
+                  <td>#${producto.id}<span class="clock-icon" style="display: ${isPending ? 'inline-block' : 'none'};"></span></td>
                   <td>${producto.nombre}</td>
                   <td>${producto.categoria}</td>
                   <td>${window.formatCurrency(producto.precio)}</td>
@@ -260,8 +275,8 @@ class UI {
                     </div>
                   </td>
                 </tr>
-              `
-                )
+              `;
+                })
                 .join('')}
             </tbody>
           </table>
@@ -314,9 +329,14 @@ class UI {
       try {
         showToast('⏳ Creando producto...', 'loading');
         const result = await api.createProducto({ nombre, categoria, precio: Number(precio), existencias: Number(existencias) });
-        showToast('Producto creado', 'success');
+        // Si la creación quedó en espera (offline), indicar mensaje acorde
+        if (result && result.data && result.data.offline) {
+          showToast('Creación de producto en espera', 'success');
+        } else {
+          showToast('Producto creado', 'success');
+        }
         closeModal();
-        
+
         // Agregar fila a la tabla sin recargar
         if (result.data && result.data.id) {
           this.addProductoToTable(result.data);
@@ -362,10 +382,14 @@ class UI {
 
       try {
         showToast('⏳ Actualizando producto...', 'loading');
-        await api.updateProducto(id, { nombre, categoria, precio: Number(precio), existencias: Number(existencias) });
-        showToast('Producto actualizado', 'success');
+        const res = await api.updateProducto(id, { nombre, categoria, precio: Number(precio), existencias: Number(existencias) });
+        if (res && res.data && (res.data.offline || String(id).startsWith('temp_'))) {
+          showToast('Modificación de producto en espera', 'success');
+        } else {
+          showToast('Producto actualizado', 'success');
+        }
         closeModal();
-        
+
         // Actualizar fila en la tabla sin recargar
         this.updateProductoInTable(id, { nombre, categoria, precio: Number(precio), existencias: Number(existencias) });
       } catch (error) {
@@ -385,10 +409,18 @@ class UI {
     showModal('🗑️ Confirmar Eliminación', content, 'Eliminar', async () => {
       try {
         showToast('⏳ Eliminando producto...', 'loading');
-        await api.deleteProducto(id);
-        showToast('Producto eliminado', 'success');
+        const res = await api.deleteProducto(id);
+        // Si la eliminación fue en espera, mostrar mensaje acorde
+        if (res && res.message && res.message.includes('eliminado') && !navigator.onLine) {
+          showToast('Eliminación de producto en espera', 'success');
+        } else if (res && res.success && navigator.onLine) {
+          showToast('Producto eliminado', 'success');
+        } else {
+          // Fallback: si la respuesta indica offline behavior
+          showToast('Eliminación de producto en espera', 'success');
+        }
         closeModal();
-        
+
         // Remover fila de la tabla sin recargar
         this.removeProductoFromTable(id);
       } catch (error) {

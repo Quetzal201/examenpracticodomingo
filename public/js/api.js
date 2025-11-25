@@ -112,35 +112,46 @@ class APIClient {
   async getProductos() {
     // Si está offline, devolver productos guardados localmente
     if (!navigator.onLine) {
-      const stored = localStorage.getItem('serverProductos');
+      const stored = localStorage.getItem('localProductos');
       const localProductos = stored ? JSON.parse(stored) : [];
       return { success: true, data: localProductos };
     }
 
-    // Si está online, obtener del servidor y guardar en cache
-    const response = await this.request('/productos', {
+    const res = await this.request('/productos', {
       method: 'GET',
     });
 
-    // Guardar en localStorage para acceso offline
-    if (response.data) {
-      localStorage.setItem('serverProductos', JSON.stringify(response.data));
+    // Guardar en cache local para uso offline
+    try {
+      if (res && res.data) {
+        localStorage.setItem('localProductos', JSON.stringify(res.data));
+      }
+    } catch (e) {
+      console.warn('No se pudo guardar cache local de productos', e);
     }
 
-    return response;
+    return res;
   }
 
   async createProducto(data) {
+    // Generar ID temporal para offline
     if (!navigator.onLine) {
-      // Guardar en cola de pendientes sin hacer la petición
+      const tempId = 'temp_' + Date.now();
+      const producto = { ...data, id: tempId, offline: true };
+
+      // Guardar localmente
+      const stored = localStorage.getItem('localProductos') || '[]';
+      const productos = JSON.parse(stored);
+      productos.push(producto);
+      localStorage.setItem('localProductos', JSON.stringify(productos));
+
+      // Agregar tarea pendiente para sincronizar cuando vuelva la red
       offlineManager.addPendingTask('CREATE', {
         endpoint: '/productos',
         method: 'POST',
-        data: data,
+        data: { ...data, tempId },
       });
 
-      // Retornar respuesta simulada para UI
-      const tempId = 'temp_' + Date.now();
       return { success: true, data: { id: tempId, ...data, offline: true } };
     }
 
@@ -151,15 +162,25 @@ class APIClient {
   }
 
   async updateProducto(id, data) {
-    if (!navigator.onLine) {
-      // Guardar en cola de pendientes sin hacer la petición
+    // Si es ID temporal o está offline, actualizar localmente
+    if (!navigator.onLine || (typeof id === 'string' && id.startsWith('temp_'))) {
+      const stored = localStorage.getItem('localProductos') || '[]';
+      const productos = JSON.parse(stored);
+      const index = productos.findIndex(p => p.id == id);
+
+      if (index !== -1) {
+        productos[index] = { ...productos[index], ...data, id };
+        localStorage.setItem('localProductos', JSON.stringify(productos));
+      }
+
+      // Agregar tarea pendiente
       offlineManager.addPendingTask('UPDATE', {
         endpoint: `/productos/${id}`,
         method: 'PUT',
-        data: data,
+        data: { ...data, id },
       });
 
-      return { success: true, data: { id, ...data, offline: true } };
+      return { success: true, data: { id, ...data } };
     }
 
     return this.request(`/productos/${id}`, {
@@ -169,14 +190,20 @@ class APIClient {
   }
 
   async deleteProducto(id) {
-    if (!navigator.onLine) {
-      // Guardar en cola de pendientes sin hacer la petición
+    // Si es ID temporal o está offline, eliminar localmente
+    if (!navigator.onLine || (typeof id === 'string' && id.startsWith('temp_'))) {
+      const stored = localStorage.getItem('localProductos') || '[]';
+      const productos = JSON.parse(stored).filter(p => p.id != id);
+      localStorage.setItem('localProductos', JSON.stringify(productos));
+
+      // Agregar tarea pendiente
       offlineManager.addPendingTask('DELETE', {
         endpoint: `/productos/${id}`,
         method: 'DELETE',
+        data: { id },
       });
 
-      return { success: true, message: 'Producto marcado para eliminación' };
+      return { success: true, message: 'Producto eliminado' };
     }
 
     return this.request(`/productos/${id}`, {

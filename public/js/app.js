@@ -21,15 +21,8 @@ class App {
     }
 
     // Escuchar cambios en conexión
-    window.addEventListener('online', () => {
-      console.log('✓ Online - Sincronizando tareas pendientes');
-      offlineManager.handleOnline();
-    });
-    
-    window.addEventListener('offline', () => {
-      console.log('✗ Offline - Guardando cambios localmente');
-      offlineManager.handleOffline();
-    });
+    window.addEventListener('online', () => offlineManager.handleOnline());
+    window.addEventListener('offline', () => offlineManager.handleOffline());
 
     // Escuchar cambios en el hash para navegación simple (SPA)
     window.addEventListener('hashchange', () => this.handleNavigation());
