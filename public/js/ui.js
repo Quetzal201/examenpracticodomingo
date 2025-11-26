@@ -484,6 +484,25 @@ class UI {
       cells[3].textContent = window.formatCurrency(data.precio);
       cells[4].textContent = data.existencias;
     }
+
+    // Aplicar estilo de pendiente si existe una tarea pendiente para este ID
+    try {
+      const pendingIds = (window.offlineManager && window.offlineManager.getPendingIds && window.offlineManager.getPendingIds()) || new Set();
+      const isPending = pendingIds.has(String(id)) || String(id).startsWith('temp_');
+      if (isPending) {
+        tr.style.opacity = '0.6';
+        tr.style.borderLeft = '3px solid #f59e0b';
+        const icon = tr.querySelector('.clock-icon');
+        if (icon) icon.style.display = 'inline-block';
+      } else {
+        tr.style.opacity = '';
+        tr.style.borderLeft = '';
+        const icon = tr.querySelector('.clock-icon');
+        if (icon) icon.style.display = 'none';
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   removeProductoFromTable(id) {
@@ -502,6 +521,32 @@ class UI {
           <p>No hay productos disponibles. ¡Agrega uno!</p>
         </div>
       `;
+    }
+  }
+
+  // Refrescar indicadores visuales de tareas pendientes sin recargar la página
+  refreshPendingIndicators() {
+    try {
+      const pendingIds = (window.offlineManager && window.offlineManager.getPendingIds && window.offlineManager.getPendingIds()) || new Set();
+      const rows = document.querySelectorAll('table tbody tr');
+      rows.forEach((tr) => {
+        const rid = tr.id ? String(tr.id).replace('producto-', '') : null;
+        if (!rid) return;
+        const isPending = pendingIds.has(String(rid)) || String(rid).startsWith('temp_');
+        if (isPending) {
+          tr.style.opacity = '0.6';
+          tr.style.borderLeft = '3px solid #f59e0b';
+          const icon = tr.querySelector('.clock-icon');
+          if (icon) icon.style.display = 'inline-block';
+        } else {
+          tr.style.opacity = '';
+          tr.style.borderLeft = '';
+          const icon = tr.querySelector('.clock-icon');
+          if (icon) icon.style.display = 'none';
+        }
+      });
+    } catch (e) {
+      // ignore
     }
   }
 }

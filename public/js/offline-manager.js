@@ -6,7 +6,9 @@ class OfflineManager {
   constructor() {
     this.pendingTasks = [];
     this.loadPendingTasks();
+    this.syncing = false;
     this.setupNetworkListeners();
+    this.startNetworkMonitor();
 
     // Si ya estamos online al inicializar, intentar sincronizar automáticamente
     if (navigator.onLine && this.hasPendingTasks()) {
@@ -23,6 +25,60 @@ class OfflineManager {
     window.addEventListener('offline', () => {
       this.handleOffline();
     });
+
+    // Escuchar cambios de localStorage desde otras pestañas
+    window.addEventListener('storage', (e) => {
+      try {
+        if (e.key === 'pendingTasks') {
+          // Actualizar la cola local y refrescar indicadores en la UI
+          this.loadPendingTasks();
+          if (window.ui && typeof window.ui.refreshPendingIndicators === 'function') {
+            window.ui.refreshPendingIndicators();
+          }
+        }
+
+        if (e.key === 'networkStatus' && e.newValue && String(e.newValue).startsWith('online')) {
+          // Otra pestaña pasó a online: intentar sincronizar aquí también
+          showToast('Conexión detectada en otra pestaña - sincronizando...', 'success', 2000);
+          this.handleOnline();
+        }
+      } catch (err) {
+        console.warn('Error manejando evento storage', err);
+      }
+    });
+
+    // Intentar sincronizar cuando la ventana recupere foco o visibilidad
+    window.addEventListener('focus', () => {
+      if (navigator.onLine) this.handleOnline();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        this.handleOnline();
+      }
+    });
+  }
+
+  // Monitor activo para detectar transiciones de offline -> online
+  startNetworkMonitor(intervalMs = 1500) {
+    try {
+      this._lastOnline = navigator.onLine;
+      this._networkMonitor = setInterval(() => {
+        try {
+          const nowOnline = navigator.onLine;
+          if (!this._lastOnline && nowOnline) {
+            // transición offline -> online detectada
+            console.log('Network monitor: detected online transition');
+            this.handleOnline();
+          }
+          this._lastOnline = nowOnline;
+        } catch (e) {
+          // ignore errors in monitor
+        }
+      }, intervalMs);
+    } catch (e) {
+      // ignore
+    }
   }
 
   handleOffline() {
@@ -31,6 +87,16 @@ class OfflineManager {
   }
 
   handleOnline() {
+    // Evitar que varias sincronizaciones se ejecuten simultáneamente
+    if (this.syncing) return;
+
+    // Registrar el estado de red en localStorage para notificar a otras pestañas
+    try {
+      localStorage.setItem('networkStatus', 'online:' + Date.now());
+    } catch (e) {
+      // ignorar
+    }
+
     // Mostrar mensajes de aviso para cada tarea pendiente (estado en espera)
     const tasks = this.getPendingTasks();
     tasks.forEach((t) => {
@@ -42,6 +108,7 @@ class OfflineManager {
 
     showToast('Conectado - Sincronizando cambios...', 'success', 2000);
     document.body.classList.remove('offline-mode');
+    // Iniciar sincronización
     this.syncPendingTasks();
   }
 
@@ -70,40 +137,58 @@ class OfflineManager {
       DELETE: '#ef4444',
       READ: '#3b82f6',
     };
-
     console.log(`⏳ ${task.action} pendiente - ID: ${task.id}`);
+
+    // Notificar a la UI de este cambio para que marque filas/elementos en la misma pestaña
+    try {
+      if (window.ui && typeof window.ui.refreshPendingIndicators === 'function') {
+        window.ui.refreshPendingIndicators();
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   async syncPendingTasks() {
     if (this.pendingTasks.length === 0) return;
 
-    // Iterar sobre copia para permitir remoción durante la sincronización
-    const tasks = [...this.pendingTasks];
-    for (const task of tasks) {
-      try {
-        console.log('Intentando sincronizar tarea', task.id, task.action);
-        await this.executePendingTask(task);
-        this.removePendingTask(task.id);
-        console.log('Tarea sincronizada correctamente', task.id);
-      } catch (error) {
-        console.error('Error al sincronizar tarea', task.id, error);
-        task.retries++;
-        if (task.retries > 3) {
-          showToast(`Error sincronizando ${task.action}`, 'error', 5000);
+    if (this.syncing) return;
+    this.syncing = true;
+    try {
+      // Señal a otras pestañas que hay sincronización en curso (opcional)
+      try { localStorage.setItem('syncInProgress', '1'); } catch (e) {}
+
+      // Iterar sobre copia para permitir remoción durante la sincronización
+      const tasks = [...this.pendingTasks];
+      for (const task of tasks) {
+        try {
+          console.log('Intentando sincronizar tarea', task.id, task.action);
+          await this.executePendingTask(task);
           this.removePendingTask(task.id);
+          console.log('Tarea sincronizada correctamente', task.id);
+        } catch (error) {
+          console.error('Error al sincronizar tarea', task.id, error);
+          task.retries++;
+          if (task.retries > 3) {
+            showToast(`Error sincronizando ${task.action}`, 'error', 5000);
+            this.removePendingTask(task.id);
+          }
         }
       }
-    }
 
-    this.savePendingTasks();
-    showToast('Sincronización completada', 'success', 2000);
+      this.savePendingTasks();
+      showToast('Sincronización completada', 'success', 2000);
 
-    // Limpiar localStorage de productos locales después de sincronizar
-    localStorage.removeItem('localProductos');
+      // Limpiar localStorage de productos locales después de sincronizar
+      localStorage.removeItem('localProductos');
 
-    // Recargar productos desde servidor
-    if (window.ui) {
-      window.ui.loadProductos();
+      // Recargar productos desde servidor
+      if (window.ui) {
+        window.ui.loadProductos();
+      }
+    } finally {
+      this.syncing = false;
+      try { localStorage.removeItem('syncInProgress'); } catch (e) {}
     }
   }
 
