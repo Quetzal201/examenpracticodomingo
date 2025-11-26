@@ -9,14 +9,20 @@
   
   <!-- PWA Manifest -->
   <link rel="manifest" href="/manifest.json" />
-  <link rel="apple-touch-icon" href="/img/icon-192.png" />
-  <link rel="icon" type="image/png" href="/img/icon-192.png" />
+  <link rel="apple-touch-icon" href="/img/product-icon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/img/product-icon.svg" />
   
   <!-- CSS -->
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
 <body>
   <div id="app"></div>
+
+  <!-- SPLASH SCREEN (se oculta automáticamente al cargar) -->
+  <div id="splash" class="splash-overlay">
+    <img src="/img/product-splash.svg" alt="Logo" class="splash-logo" />
+    <div class="splash-title">Cargando Gestor de Productos...</div>
+  </div>
 
   <!-- Notificación de estado (offline/online) -->
   <div id="toast" class="toast"></div>
@@ -124,10 +130,17 @@
     // Mostrar un toast con botón accionable (texto y callback)
     function showActionToast(message, buttonText = 'OK', onClick = null, duration = 0) {
       const toast = document.getElementById('toast');
+      // install icon SVG (inline small)
+      const installIcon = `
+        <svg class="install-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path fill="currentColor" d="M5 20h14v-2H5v2zm7-18L5.33 9h3.34v4h6.66V9h3.34L12 2z" />
+        </svg>
+      `;
+
       toast.innerHTML = `
         <span class="toast-icon">📱</span>
         <span class="toast-message">${message}</span>
-        <button id="toastActionBtn" class="toast-action">${buttonText}</button>
+        <button id="toastActionBtn" class="toast-action">${installIcon}<span>${buttonText}</span></button>
       `;
       toast.className = `toast show action`;
 
@@ -144,6 +157,30 @@
       }
     }
     window.showActionToast = showActionToast;
+
+    // Ocultar splash cuando la app esté lista o al cargar la ventana
+    // Espera 3 segundos antes de iniciar la animación de salida
+    (function () {
+      let splashRequested = false;
+      function hideSplash(delayMs = 3000) {
+        try {
+          const s = document.getElementById('splash');
+          if (!s) return;
+          if (splashRequested) return; // evitar múltiples llamadas
+          splashRequested = true;
+          setTimeout(() => {
+            s.classList.add('splash-hide');
+            setTimeout(() => { if (s && s.parentNode) s.parentNode.removeChild(s); }, 420);
+          }, delayMs);
+        } catch (e) { /* ignore */ }
+      }
+
+      window.addEventListener('load', () => hideSplash(3000));
+      // Fallback: si la app inicializa antes de load, esconder cuando window.app esté definido
+      const appReadyInterval = setInterval(() => {
+        if (window.app) { hideSplash(3000); clearInterval(appReadyInterval); }
+      }, 200);
+    })();
   </script>
   
   <script src="/js/utils.js"></script>

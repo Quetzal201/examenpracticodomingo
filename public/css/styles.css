@@ -767,6 +767,59 @@ tbody tr:last-child td {
   }
 }
 
+/* ===========================
+   SPLASH SCREEN
+   =========================== */
+.splash-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, #111 0%, #1a1a1a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  flex-direction: column;
+}
+.splash-logo {
+  width: 180px;
+  height: 180px;
+}
+.splash-title {
+  margin-top: 18px;
+  color: var(--text-secondary);
+  font-size: 18px;
+}
+.splash-hide {
+  animation: splashOut 0.4s ease forwards;
+}
+@keyframes splashOut {
+  to { opacity: 0; transform: translateY(-10px); visibility: hidden; }
+}
+
+/* ===========================
+   TOAST ACTION BUTTON (INSTALL)
+   =========================== */
+.toast.action .toast-action {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.toast-action .install-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+}
+.toast.action {
+  align-items: center;
+}
+
 @media (max-width: 480px) {
   .header-title {
     font-size: 18px;
