@@ -120,6 +120,30 @@
     window.handleModalAction = handleModalAction;
     window.formatCurrency = formatCurrency;
     window.formatDate = formatDate;
+
+    // Mostrar un toast con botón accionable (texto y callback)
+    function showActionToast(message, buttonText = 'OK', onClick = null, duration = 0) {
+      const toast = document.getElementById('toast');
+      toast.innerHTML = `
+        <span class="toast-icon">📱</span>
+        <span class="toast-message">${message}</span>
+        <button id="toastActionBtn" class="toast-action">${buttonText}</button>
+      `;
+      toast.className = `toast show action`;
+
+      const btn = document.getElementById('toastActionBtn');
+      if (btn && typeof onClick === 'function') {
+        btn.addEventListener('click', () => {
+          onClick();
+          toast.classList.remove('show');
+        });
+      }
+
+      if (duration > 0) {
+        setTimeout(() => toast.classList.remove('show'), duration);
+      }
+    }
+    window.showActionToast = showActionToast;
   </script>
   
   <script src="/js/utils.js"></script>
@@ -127,6 +151,7 @@
   <script src="/js/api.js"></script>
   <script src="/js/auth.js"></script>
   <script src="/js/ui.js"></script>
+  <script src="/js/pwa-install.js"></script>
   <script src="/js/app.js"></script>
   
   <!-- Service Worker -->
