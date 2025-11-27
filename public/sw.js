@@ -15,16 +15,29 @@ const STATIC_ASSETS = [
   '/js/auth.js',
   '/js/ui.js',
   '/js/app.js',
+  '/img/product-icon.svg',
+  '/img/product-splash.svg'
 ];
 
 // Instalar Service Worker
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('✓ Cache creado y archivos almacenados');
-      return cache.addAll(STATIC_ASSETS);
-    })
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    console.log('> SW install: caching static assets');
+    // Cache each asset individually and ignore failures so install doesn't fail
+    await Promise.all(STATIC_ASSETS.map(async (url) => {
+      try {
+        const res = await fetch(url, { cache: 'no-cache' });
+        if (res && res.ok) {
+          await cache.put(url, res.clone());
+        } else {
+          console.warn('> SW install: failed to fetch', url, res && res.status);
+        }
+      } catch (e) {
+        console.warn('> SW install: error fetching', url, e && e.message);
+      }
+    }));
+  })());
   self.skipWaiting();
 });
 
@@ -75,10 +88,37 @@ async function cacheFirstStrategy(request) {
     runtimeCache.put(request, response.clone());
     return response;
   } catch (error) {
-    // Retornar página offline si no hay cache
-    if (request.destination === 'document') {
-      return cache.match('/index.html');
+    // Retornar página offline o assets de fallback si no hay cache
+    // Navigation/document requests -> serve index.html from cache if available
+    if (request.destination === 'document' || request.mode === 'navigate') {
+      const fallback = await cache.match('/index.html');
+      if (fallback) return fallback;
+      return new Response('<h1>Offline</h1>', { headers: { 'Content-Type': 'text/html' }, status: 503 });
     }
+
+    // Styles -> try to return cached stylesheet
+    if (request.destination === 'style' || request.url.endsWith('.css')) {
+      const fallback = await cache.match('/css/styles.css');
+      if (fallback) return fallback;
+    }
+
+    // Scripts -> try cached script
+    if (request.destination === 'script' || request.url.endsWith('.js')) {
+      const fallback = await cache.match('/js/app.js');
+      if (fallback) return fallback;
+      return new Response('', { status: 503 });
+    }
+
+    // Images -> try product icon or a tiny svg placeholder
+    if (request.destination === 'image' || request.url.match(/\.(png|jpg|jpeg|svg)$/)) {
+      const img = await cache.match('/img/product-icon.svg');
+      if (img) return img;
+      // return a small inline SVG fallback
+      const svg = `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"><rect width="100%" height="100%" fill="#1a1a1a"/><text x="50%" y="50%" fill="#fff" font-size="10" text-anchor="middle" dy=".3em">App</text></svg>`;
+      return new Response(svg, { headers: { 'Content-Type': 'image/svg+xml' } });
+    }
+
+    // Fallback generic
     return new Response('Offline', { status: 503 });
   }
 }
