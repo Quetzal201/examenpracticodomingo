@@ -29,6 +29,10 @@
   // También escuchar appinstalled para limpiar estado
   window.addEventListener('appinstalled', () => {
     deferredPrompt = null;
+    try {
+      // Marcar para mostrar splash en el próximo lanzamiento de la app instalada
+      localStorage.setItem('showSplashOnInstall', '1');
+    } catch (e) {}
     window.showToast('Aplicación instalada', 'success', 3000);
   });
 })();

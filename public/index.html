@@ -158,28 +158,41 @@
     }
     window.showActionToast = showActionToast;
 
-    // Ocultar splash cuando la app esté lista o al cargar la ventana
-    // Espera 3 segundos antes de iniciar la animación de salida
+    // Mostrar el splash solo si la app fue instalada recientemente (flag set por `appinstalled`)
     (function () {
-      let splashRequested = false;
-      function hideSplash(delayMs = 3000) {
-        try {
-          const s = document.getElementById('splash');
-          if (!s) return;
-          if (splashRequested) return; // evitar múltiples llamadas
-          splashRequested = true;
-          setTimeout(() => {
-            s.classList.add('splash-hide');
-            setTimeout(() => { if (s && s.parentNode) s.parentNode.removeChild(s); }, 420);
-          }, delayMs);
-        } catch (e) { /* ignore */ }
-      }
+      try {
+        const s = document.getElementById('splash');
+        const shouldShow = (function () {
+          try { return localStorage.getItem('showSplashOnInstall') === '1'; } catch (e) { return false; }
+        })();
 
-      window.addEventListener('load', () => hideSplash(3000));
-      // Fallback: si la app inicializa antes de load, esconder cuando window.app esté definido
-      const appReadyInterval = setInterval(() => {
-        if (window.app) { hideSplash(3000); clearInterval(appReadyInterval); }
-      }, 200);
+        if (!s) return;
+
+        if (!shouldShow) {
+          // No queremos mostrar el splash: eliminar inmediatamente
+          if (s.parentNode) s.parentNode.removeChild(s);
+          return;
+        }
+
+        // Si sí debemos mostrarlo, esperar 3s y ocultarlo; luego limpiar la flag
+        let splashRequested = false;
+        function hideSplash(delayMs = 3000) {
+          try {
+            if (splashRequested) return;
+            splashRequested = true;
+            setTimeout(() => {
+              s.classList.add('splash-hide');
+              setTimeout(() => { if (s && s.parentNode) s.parentNode.removeChild(s); }, 420);
+              try { localStorage.removeItem('showSplashOnInstall'); } catch (e) {}
+            }, delayMs);
+          } catch (e) { /* ignore */ }
+        }
+
+        window.addEventListener('load', () => hideSplash(3000));
+        const appReadyInterval = setInterval(() => {
+          if (window.app) { hideSplash(3000); clearInterval(appReadyInterval); }
+        }, 200);
+      } catch (e) { /* ignore */ }
     })();
   </script>
   
