@@ -12,7 +12,13 @@ class App {
     if (authManager.isAuthenticated()) {
       ui.renderProductosPage();
     } else {
-      ui.renderAuthPage();
+      // Mostrar landing page si no hay hash, sino mostrar login
+      const hash = window.location.hash;
+      if (hash === '#login' || hash === '#register') {
+        ui.renderAuthPage();
+      } else {
+        ui.renderLandingPage();
+      }
     }
 
     // Verificar estado de conexión
@@ -33,10 +39,14 @@ class App {
 
     if (hash === '#logout') {
       authManager.logout();
-      ui.renderAuthPage();
+      ui.renderLandingPage();
       window.location.hash = '';
+    } else if (hash === '#login' || hash === '#register') {
+      ui.renderAuthPage();
     } else if (hash === '#productos' && authManager.isAuthenticated()) {
       ui.renderProductosPage();
+    } else if (!authManager.isAuthenticated() && !hash) {
+      ui.renderLandingPage();
     }
   }
 }

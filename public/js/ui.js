@@ -3,6 +3,92 @@
 // ===========================
 
 class UI {
+  renderLandingPage() {
+    const app = document.getElementById('app');
+    app.innerHTML = `
+      <div class="landing-page">
+        <!-- Hero Section -->
+        <section class="landing-hero">
+          <div class="landing-container">
+            <div class="landing-content">
+              <div class="landing-logo">
+                <img src="/img/product-icon.svg" alt="Tienda Logo" class="landing-logo-img" />
+              </div>
+              <h1 class="landing-title">🛍️ Tienda de Productos</h1>
+              <p class="landing-subtitle">Gestión inteligente de inventario con tecnología PWA</p>
+              <p class="landing-description">
+                Administra tu catálogo de productos de forma eficiente. 
+                Funciona offline, se sincroniza automáticamente y está disponible en cualquier dispositivo.
+              </p>
+              <div class="landing-cta">
+                <button class="btn btn-primary btn-lg" onclick="ui.goToLogin()">
+                  Iniciar Sesión
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="landing-features">
+          <div class="landing-container">
+            <h2 class="landing-section-title">Características Principales</h2>
+            <div class="features-grid">
+              <div class="feature-card">
+                <div class="feature-icon">📱</div>
+                <h3 class="feature-title">Aplicación PWA</h3>
+                <p class="feature-description">
+                  Instálala en tu dispositivo y accede sin conexión a internet
+                </p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3 class="feature-title">Sincronización Automática</h3>
+                <p class="feature-description">
+                  Los cambios se guardan automáticamente cuando recuperas la conexión
+                </p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3 class="feature-title">Gestión Completa</h3>
+                <p class="feature-description">
+                  Crea, edita y elimina productos con una interfaz intuitiva
+                </p>
+              </div>
+              <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h3 class="feature-title">Seguro y Privado</h3>
+                <p class="feature-description">
+                  Tus datos están protegidos con autenticación segura
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section class="landing-cta-section">
+          <div class="landing-container">
+            <div class="cta-content">
+              <h2 class="cta-title">¿Listo para comenzar?</h2>
+              <p class="cta-description">
+                Inicia sesión o crea una cuenta para empezar a gestionar tus productos
+              </p>
+              <button class="btn btn-primary btn-lg" onclick="ui.goToLogin()">
+                Comenzar Ahora
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  goToLogin() {
+    window.location.hash = '#login';
+    this.renderAuthPage();
+  }
+
   renderAuthPage() {
     const app = document.getElementById('app');
     app.innerHTML = `
