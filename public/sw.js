@@ -16,7 +16,9 @@ const STATIC_ASSETS = [
   '/js/ui.js',
   '/js/app.js',
   '/img/product-icon.svg',
-  '/img/product-splash.svg'
+  '/img/product-splash.svg',
+  '/img/icon-192.png',
+  '/img/icon-512.png'
 ];
 
 // Instalar Service Worker

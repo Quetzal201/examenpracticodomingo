@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generador de Iconos PWA</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      background: #2d2d2d;
+      padding: 30px;
+      border-radius: 12px;
+      border: 1px solid #404040;
+    }
+    h1 { color: #3b82f6; }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 5px;
+    }
+    button:hover { background: #2563eb; }
+    .preview {
+      margin: 20px 0;
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .icon-preview {
+      text-align: center;
+      padding: 15px;
+      background: #3a3a3a;
+      border-radius: 8px;
+    }
+    .icon-preview img {
+      border: 2px solid #404040;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      background: #10b981;
+      border-radius: 6px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🛍️ Generador de Iconos PWA</h1>
+    <p>Este script genera los iconos PNG necesarios para la PWA desde el SVG existente.</p>
+    <p><strong>Instrucciones:</strong> Haz clic en el botón para generar y descargar los iconos. Luego colócalos en la carpeta <code>public/img/</code></p>
+    
+    <div>
+      <button onclick="generateIcons()">Generar Iconos (192x192 y 512x512)</button>
+    </div>
+
+    <div class="preview" id="preview"></div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    async function loadSVG() {
+      try {
+        const response = await fetch('/img/product-icon.svg');
+        const svgText = await response.text();
+        return svgText;
+      } catch (error) {
+        console.error('Error cargando SVG:', error);
+        return null;
+      }
+    }
+
+    function svgToImage(svgText, size) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+        
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, size, size);
+          
+          canvas.toBlob((blob) => {
+            URL.revokeObjectURL(url);
+            resolve(blob);
+          }, 'image/png');
+        };
+        
+        img.src = url;
+      });
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    async function generateIcons() {
+      const status = document.getElementById('status');
+      const preview = document.getElementById('preview');
+      
+      status.style.display = 'block';
+      status.textContent = 'Generando iconos...';
+      status.style.background = '#f59e0b';
+      preview.innerHTML = '';
+
+      const svgText = await loadSVG();
+      if (!svgText) {
+        status.textContent = 'Error: No se pudo cargar el SVG. Asegúrate de estar ejecutando el servidor.';
+        status.style.background = '#ef4444';
+        return;
+      }
+
+      try {
+        // Generar icono 192x192
+        const icon192 = await svgToImage(svgText, 192);
+        downloadBlob(icon192, 'icon-192.png');
+        
+        // Generar icono 512x512
+        const icon512 = await svgToImage(svgText, 512);
+        downloadBlob(icon512, 'icon-512.png');
+
+        // Mostrar previews
+        const preview192 = document.createElement('div');
+        preview192.className = 'icon-preview';
+        preview192.innerHTML = `
+          <img src="${URL.createObjectURL(icon192)}" width="192" height="192" alt="192x192">
+          <div>icon-192.png</div>
+        `;
+        
+        const preview512 = document.createElement('div');
+        preview512.className = 'icon-preview';
+        preview512.innerHTML = `
+          <img src="${URL.createObjectURL(icon512)}" width="256" height="256" alt="512x512">
+          <div>icon-512.png</div>
+        `;
+
+        preview.appendChild(preview192);
+        preview.appendChild(preview512);
+
+        status.textContent = '✓ Iconos generados correctamente. Descárgalos y colócalos en public/img/';
+        status.style.background = '#10b981';
+      } catch (error) {
+        status.textContent = 'Error generando iconos: ' + error.message;
+        status.style.background = '#ef4444';
+        console.error(error);
+      }
+    }
+  </script>
+</body>
+</html>
