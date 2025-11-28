@@ -217,15 +217,24 @@ class OfflineManager {
       // Señal a otras pestañas que hay sincronización en curso (opcional)
       try { localStorage.setItem('syncInProgress', '1'); } catch (e) {}
 
-      // Iterar sobre copia para permitir remoción durante la sincronización
-      const tasks = [...this.pendingTasks];
+      // Ordenar tareas: CREATE primero, luego UPDATE, luego DELETE
+      // Esto asegura que los productos se creen antes de actualizarse o eliminarse
+      const tasks = [...this.pendingTasks].sort((a, b) => {
+        const order = { 'CREATE': 1, 'UPDATE': 2, 'DELETE': 3 };
+        return (order[a.action] || 99) - (order[b.action] || 99);
+      });
       const syncedTaskIds = [];
       
       for (const task of tasks) {
         try {
           console.log('Intentando sincronizar tarea', task.id, task.action);
-          await this.executePendingTask(task);
+          const response = await this.executePendingTask(task);
           syncedTaskIds.push(task.id);
+          
+          // Obtener el ID temporal antes de eliminar la tarea
+          const tempId = this.getTempIdFromTask(task);
+          const realId = this.getRealIdFromResponse(task, response);
+          
           this.removePendingTask(task.id);
           // También eliminar de IDB
           try {
@@ -235,6 +244,10 @@ class OfflineManager {
           } catch (e) {
             console.warn('Error removiendo tarea de IDB', e);
           }
+          
+          // Actualizar UI inmediatamente después de sincronizar
+          this.updateUIAfterSync(task.action, tempId, realId, response);
+          
           console.log('Tarea sincronizada correctamente', task.id);
         } catch (error) {
           console.error('Error al sincronizar tarea', task.id, error);
@@ -269,9 +282,13 @@ class OfflineManager {
       // Limpiar localStorage de productos locales después de sincronizar
       localStorage.removeItem('localProductos');
 
-      // Recargar productos desde servidor
-      if (window.ui) {
-        window.ui.loadProductos();
+      // Recargar productos desde servidor solo si hay tareas sincronizadas
+      // (la UI ya se actualizó individualmente, pero esto asegura consistencia)
+      if (window.ui && syncedTaskIds.length > 0) {
+        // Pequeño delay para asegurar que el servidor procesó todo
+        setTimeout(() => {
+          window.ui.loadProductos();
+        }, 300);
       }
     } finally {
       this.syncing = false;
@@ -454,6 +471,188 @@ class OfflineManager {
 
   hasPendingTasks() {
     return this.pendingTasks.length > 0;
+  }
+
+  // Obtener ID temporal o ID de una tarea (para UPDATE/DELETE puede ser temporal o real)
+  getTempIdFromTask(task) {
+    const maybe = (task && task.data) || {};
+    const inner = maybe.data || maybe;
+    // Para CREATE, buscar tempId en los datos
+    if (inner && inner.tempId) return inner.tempId;
+    // Para UPDATE/DELETE, el ID está en el endpoint o en data.id
+    if (inner && inner.id) return inner.id;
+    // También verificar en el endpoint para UPDATE/DELETE
+    if (maybe.endpoint) {
+      const parts = String(maybe.endpoint).split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last && (String(last).startsWith('temp_') || !isNaN(Number(last)))) {
+        return last;
+      }
+    }
+    return null;
+  }
+
+  // Obtener ID real de la respuesta del servidor
+  getRealIdFromResponse(task, response) {
+    if (!response) return null;
+    
+    // Para CREATE y UPDATE, el ID está en response.data.id
+    if (response.data && response.data.id) {
+      return String(response.data.id);
+    }
+    if (response.id) {
+      return String(response.id);
+    }
+    
+    // Para DELETE, la respuesta no incluye el ID, usar el del endpoint
+    // Para UPDATE también puede estar en el endpoint si no viene en la respuesta
+    if ((task.action === 'UPDATE' || task.action === 'DELETE') && task.data && task.data.endpoint) {
+      const parts = String(task.data.endpoint).split('/').filter(Boolean);
+      const last = parts[parts.length - 1];
+      // Solo usar si no es un ID temporal
+      if (last && !String(last).startsWith('temp_') && !isNaN(Number(last))) {
+        return String(last);
+      }
+    }
+    
+    return null;
+  }
+
+  // Actualizar UI después de sincronizar una tarea
+  updateUIAfterSync(action, tempId, realId, response) {
+    if (!window.ui) return;
+
+    try {
+      switch (action) {
+        case 'CREATE': {
+          // Obtener datos del producto real de la respuesta
+          const productoReal = (response && response.data) || response || {};
+          
+          if (productoReal.id) {
+            // Buscar fila temporal por ID temporal
+            if (tempId) {
+              const tempRow = document.getElementById(`producto-${tempId}`);
+              if (tempRow) {
+                // Reemplazar producto temporal con el real
+                tempRow.id = `producto-${productoReal.id}`;
+                // Actualizar el contenido de la fila con los datos reales
+                const cells = tempRow.querySelectorAll('td');
+                if (cells.length > 0) {
+                  cells[0].innerHTML = `#${productoReal.id}<span class="clock-icon" style="display: none;"></span>`;
+                }
+                // Actualizar datos del producto en las celdas
+                if (cells.length >= 5) {
+                  cells[1].textContent = productoReal.nombre || '';
+                  cells[2].textContent = productoReal.categoria || '';
+                  cells[3].textContent = window.formatCurrency ? window.formatCurrency(productoReal.precio || 0) : productoReal.precio || 0;
+                  cells[4].textContent = productoReal.existencias || 0;
+                }
+                // Remover estilos de pendiente
+                tempRow.style.opacity = '';
+                tempRow.style.borderLeft = '';
+                // Actualizar los botones de acción con el nuevo ID
+                const editBtn = tempRow.querySelector('button[onclick*="openEditModal"]');
+                const deleteBtn = tempRow.querySelector('button[onclick*="openDeleteModal"]');
+                if (editBtn) {
+                  editBtn.setAttribute('onclick', `ui.openEditModal('${productoReal.id}', ${JSON.stringify(productoReal).replace(/"/g, '&quot;')})`);
+                }
+                if (deleteBtn) {
+                  deleteBtn.setAttribute('onclick', `ui.openDeleteModal('${productoReal.id}')`);
+                }
+              } else {
+                // Si no existe la fila temporal, agregar el producto real
+                window.ui.addProductoToTable(productoReal);
+              }
+            } else {
+              // Si no hay tempId, simplemente agregar el producto real
+              window.ui.addProductoToTable(productoReal);
+            }
+          }
+          // Refrescar indicadores
+          if (window.ui.refreshPendingIndicators) {
+            window.ui.refreshPendingIndicators();
+          }
+          break;
+        }
+        case 'UPDATE': {
+          // Actualizar la fila con los datos más recientes
+          const productoActualizado = (response && response.data) || response || {};
+          const idToUpdate = realId || tempId;
+          
+          if (idToUpdate) {
+            // Intentar con ID real primero, luego con temporal
+            let row = realId ? document.getElementById(`producto-${realId}`) : null;
+            if (!row && tempId) {
+              row = document.getElementById(`producto-${tempId}`);
+            }
+            
+            if (row) {
+              // Remover estilos de pendiente
+              row.style.opacity = '';
+              row.style.borderLeft = '';
+              const icon = row.querySelector('.clock-icon');
+              if (icon) icon.style.display = 'none';
+              
+              // Si tenemos datos actualizados, actualizar las celdas
+              if (productoActualizado.id || productoActualizado.nombre) {
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 5) {
+                  if (productoActualizado.nombre) cells[1].textContent = productoActualizado.nombre;
+                  if (productoActualizado.categoria) cells[2].textContent = productoActualizado.categoria;
+                  if (productoActualizado.precio !== undefined) {
+                    cells[3].textContent = window.formatCurrency ? window.formatCurrency(productoActualizado.precio) : productoActualizado.precio;
+                  }
+                  if (productoActualizado.existencias !== undefined) {
+                    cells[4].textContent = productoActualizado.existencias;
+                  }
+                }
+              }
+            }
+          }
+          
+          // Refrescar indicadores para remover el estilo de pendiente
+          if (window.ui.refreshPendingIndicators) {
+            window.ui.refreshPendingIndicators();
+          }
+          break;
+        }
+        case 'DELETE': {
+          // Eliminar la fila si existe (puede ser ID temporal o real)
+          if (tempId) {
+            const row = document.getElementById(`producto-${tempId}`);
+            if (row) {
+              row.remove();
+            }
+          }
+          if (realId && realId !== tempId) {
+            const row = document.getElementById(`producto-${realId}`);
+            if (row) {
+              row.remove();
+            }
+          }
+          // Verificar si la tabla quedó vacía y mostrar mensaje
+          const tbody = document.querySelector('table tbody');
+          if (tbody && tbody.children.length === 0) {
+            const content = document.getElementById('productosContent');
+            if (content) {
+              content.innerHTML = `
+                <div class="productos-empty">
+                  <div class="productos-empty-icon">📦</div>
+                  <p>No hay productos disponibles. ¡Agrega uno!</p>
+                </div>
+              `;
+            }
+          }
+          // Refrescar indicadores
+          if (window.ui.refreshPendingIndicators) {
+            window.ui.refreshPendingIndicators();
+          }
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('Error actualizando UI después de sincronizar', e);
+    }
   }
 }
 
