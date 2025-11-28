@@ -7,13 +7,22 @@ class OfflineManager {
     this.pendingTasks = [];
     this.loadPendingTasks();
     this.syncing = false;
+    this.lastSyncTime = null;
     this.setupNetworkListeners();
     this.startNetworkMonitor();
 
-    // Si ya estamos online al inicializar, intentar sincronizar automáticamente
+    // Si ya estamos online al inicializar, verificar si realmente hay tareas pendientes
+    // y evitar sincronización si ya se sincronizó recientemente
     if (navigator.onLine && this.hasPendingTasks()) {
-      // Deferir para que el resto de la app inicialice
-      setTimeout(() => this.handleOnline(), 500);
+      // Verificar si hay una sincronización reciente (últimos 5 segundos)
+      const lastSync = localStorage.getItem('lastSyncTime');
+      const now = Date.now();
+      const shouldSync = !lastSync || (now - parseInt(lastSync, 10)) > 5000;
+      
+      if (shouldSync) {
+        // Deferir para que el resto de la app inicialice
+        setTimeout(() => this.handleOnline(), 500);
+      }
     }
   }
 
@@ -108,6 +117,23 @@ class OfflineManager {
     // Evitar que varias sincronizaciones se ejecuten simultáneamente
     if (this.syncing) return;
 
+    // Verificar si realmente hay tareas pendientes antes de sincronizar
+    const tasks = this.getPendingTasks();
+    if (tasks.length === 0) {
+      document.body.classList.remove('offline-mode');
+      return;
+    }
+
+    // Verificar si ya se sincronizó recientemente (últimos 3 segundos)
+    // para evitar sincronizaciones duplicadas en recargas rápidas
+    const lastSync = localStorage.getItem('lastSyncTime');
+    const now = Date.now();
+    if (lastSync && (now - parseInt(lastSync, 10)) < 3000) {
+      console.log('Sincronización reciente detectada, omitiendo...');
+      document.body.classList.remove('offline-mode');
+      return;
+    }
+
     // Registrar el estado de red en localStorage para notificar a otras pestañas
     try {
       localStorage.setItem('networkStatus', 'online:' + Date.now());
@@ -116,7 +142,6 @@ class OfflineManager {
     }
 
     // Mostrar mensajes de aviso para cada tarea pendiente (estado en espera)
-    const tasks = this.getPendingTasks();
     tasks.forEach((t) => {
       const action = t.action;
       if (action === 'CREATE') showToast('Creación de producto en espera', 'success', 2500);
@@ -194,11 +219,22 @@ class OfflineManager {
 
       // Iterar sobre copia para permitir remoción durante la sincronización
       const tasks = [...this.pendingTasks];
+      const syncedTaskIds = [];
+      
       for (const task of tasks) {
         try {
           console.log('Intentando sincronizar tarea', task.id, task.action);
           await this.executePendingTask(task);
+          syncedTaskIds.push(task.id);
           this.removePendingTask(task.id);
+          // También eliminar de IDB
+          try {
+            if (window.idbTasks && typeof window.idbTasks.removeTask === 'function') {
+              await window.idbTasks.removeTask(task.id);
+            }
+          } catch (e) {
+            console.warn('Error removiendo tarea de IDB', e);
+          }
           console.log('Tarea sincronizada correctamente', task.id);
         } catch (error) {
           console.error('Error al sincronizar tarea', task.id, error);
@@ -206,12 +242,29 @@ class OfflineManager {
           if (task.retries > 3) {
             showToast(`Error sincronizando ${task.action}`, 'error', 5000);
             this.removePendingTask(task.id);
+            // Eliminar de IDB también
+            try {
+              if (window.idbTasks && typeof window.idbTasks.removeTask === 'function') {
+                await window.idbTasks.removeTask(task.id);
+              }
+            } catch (e) {}
+          } else {
+            // Guardar tarea actualizada con más reintentos
+            this.savePendingTasks();
           }
         }
       }
 
+      // Guardar timestamp de última sincronización
+      try {
+        localStorage.setItem('lastSyncTime', String(Date.now()));
+      } catch (e) {}
+
       this.savePendingTasks();
-      showToast('Sincronización completada', 'success', 2000);
+      
+      if (syncedTaskIds.length > 0) {
+        showToast('Sincronización completada', 'success', 2000);
+      }
 
       // Limpiar localStorage de productos locales después de sincronizar
       localStorage.removeItem('localProductos');
@@ -297,16 +350,45 @@ class OfflineManager {
   removePendingTask(taskId) {
     this.pendingTasks = this.pendingTasks.filter((t) => t.id !== taskId);
     this.savePendingTasks();
+    
+    // También eliminar de IDB
+    try {
+      if (window.idbTasks && typeof window.idbTasks.removeTask === 'function') {
+        window.idbTasks.removeTask(taskId).catch(() => {});
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   savePendingTasks() {
     try { localStorage.setItem('pendingTasks', JSON.stringify(this.pendingTasks)); } catch (e) {}
-    // also ensure IDB is in sync
+    // also ensure IDB is in sync - solo guardar tareas que realmente existen
     try {
       if (window.idbTasks && typeof window.idbTasks.addTask === 'function') {
-        // Upsert all tasks
-        this.pendingTasks.forEach(t => {
-          try { window.idbTasks.addTask(t).catch(() => {}); } catch(e){}
+        // Obtener todas las tareas de IDB primero
+        window.idbTasks.getAllTasks().then(existingTasks => {
+          const existingIds = new Set(existingTasks.map(t => String(t.id)));
+          const currentIds = new Set(this.pendingTasks.map(t => String(t.id)));
+          
+          // Eliminar tareas de IDB que ya no están en pendingTasks
+          existingTasks.forEach(t => {
+            if (!currentIds.has(String(t.id))) {
+              try {
+                window.idbTasks.removeTask(t.id).catch(() => {});
+              } catch (e) {}
+            }
+          });
+          
+          // Agregar/actualizar tareas actuales en IDB
+          this.pendingTasks.forEach(t => {
+            try { window.idbTasks.addTask(t).catch(() => {}); } catch(e){}
+          });
+        }).catch(() => {
+          // Si falla getAllTasks, solo hacer upsert de las actuales
+          this.pendingTasks.forEach(t => {
+            try { window.idbTasks.addTask(t).catch(() => {}); } catch(e){}
+          });
         });
       }
     } catch (e) {}
@@ -320,13 +402,25 @@ class OfflineManager {
       this.pendingTasks = [];
     }
 
-    // If IDB available, load from there and merge
+    // If IDB available, load from there and merge (solo si hay tareas en IDB)
+    // Pero evitar duplicados: si una tarea está en ambos, usar la de localStorage como fuente de verdad
     try {
       if (window.idbTasks && typeof window.idbTasks.getAllTasks === 'function') {
         window.idbTasks.getAllTasks().then(tasks => {
-          const map = new Map(this.pendingTasks.map(t => [String(t.id), t]));
-          tasks.forEach(t => { map.set(String(t.id), t); });
-          this.pendingTasks = Array.from(map.values());
+          if (!tasks || tasks.length === 0) return;
+          
+          // Crear mapa de tareas de localStorage (fuente de verdad)
+          const localMap = new Map(this.pendingTasks.map(t => [String(t.id), t]));
+          
+          // Agregar solo tareas de IDB que no estén en localStorage
+          tasks.forEach(t => {
+            const taskId = String(t.id);
+            if (!localMap.has(taskId)) {
+              localMap.set(taskId, t);
+            }
+          });
+          
+          this.pendingTasks = Array.from(localMap.values());
           // persist merged result back to localStorage
           try { localStorage.setItem('pendingTasks', JSON.stringify(this.pendingTasks)); } catch (e) {}
         }).catch(() => {});

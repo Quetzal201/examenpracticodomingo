@@ -152,6 +152,25 @@ class UI {
     // Obtener IDs pendientes del offlineManager (maneja varias formas de tareas)
     const pendingIds = (window.offlineManager && window.offlineManager.getPendingIds && window.offlineManager.getPendingIds()) || new Set();
 
+    // Verificar si hay tareas pendientes de CREATE que aún no están en productos locales
+    const pendingTasks = (window.offlineManager && window.offlineManager.getPendingTasks && window.offlineManager.getPendingTasks()) || [];
+    const createTasks = pendingTasks.filter(t => t.action === 'CREATE');
+    
+    // Agregar productos de tareas CREATE pendientes que no estén en la lista local
+    createTasks.forEach(task => {
+      const taskData = (task.data && task.data.data) || task.data || {};
+      if (taskData.tempId && !productos.find(p => p.id === taskData.tempId)) {
+        productos.push({
+          id: taskData.tempId,
+          nombre: taskData.nombre || 'Producto en espera',
+          categoria: taskData.categoria || '',
+          precio: taskData.precio || 0,
+          existencias: taskData.existencias || 0,
+          offline: true
+        });
+      }
+    });
+
     if (productos.length === 0) {
       content.innerHTML = `
         <div class="productos-empty">
@@ -438,22 +457,51 @@ class UI {
 
   // Métodos AJAX para actualizar tabla sin recargar
   addProductoToTable(producto) {
-    const tbody = document.querySelector('table tbody');
-    if (!tbody) return;
+    const content = document.getElementById('productosContent');
+    if (!content) return;
 
     // Ocultar mensaje de vacío si existe
     const emptyMsg = document.querySelector('.productos-empty');
     if (emptyMsg) emptyMsg.remove();
 
+    // Si no hay tabla, crearla completa
+    let tbody = document.querySelector('table tbody');
+    if (!tbody) {
+      // Crear la tabla completa
+      const tableHTML = `
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Categoría</th>
+                <th>Precio</th>
+                <th>Stock</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      `;
+      content.innerHTML = tableHTML;
+      tbody = document.querySelector('table tbody');
+    }
+
+    // Obtener IDs pendientes para marcar correctamente
+    const pendingIds = (window.offlineManager && window.offlineManager.getPendingIds && window.offlineManager.getPendingIds()) || new Set();
+    const isPending = producto.offline || pendingIds.has(String(producto.id)) || String(producto.id).startsWith('temp_');
+
     const tr = document.createElement('tr');
     tr.id = `producto-${producto.id}`;
-    if (producto.offline) {
+    if (isPending) {
       tr.style.opacity = '0.6';
       tr.style.borderLeft = '3px solid #f59e0b';
     }
 
     tr.innerHTML = `
-      <td>#${producto.id}<span class="clock-icon" style="display: ${producto.offline ? 'inline-block' : 'none'};"></span></td>
+      <td>#${producto.id}<span class="clock-icon" style="display: ${isPending ? 'inline-block' : 'none'};"></span></td>
       <td>${producto.nombre}</td>
       <td>${producto.categoria}</td>
       <td>${window.formatCurrency(producto.precio)}</td>
