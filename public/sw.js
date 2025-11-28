@@ -55,22 +55,50 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    // Enable navigation preload if available
+    if (self.registration.navigationPreload) {
+      try { await self.registration.navigationPreload.enable(); } catch (e) { /* ignore */ }
+    }
+    await self.clients.claim();
+  })());
 });
 
 // Interceptar solicitudes - Estrategia Cache First para assets estáticos
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
+  const request = event.request;
   const url = new URL(request.url);
 
-  // API calls - Network First
+  // API calls -> network first
   if (url.pathname.startsWith('/api')) {
     event.respondWith(networkFirstStrategy(request));
+    return;
   }
-  // Static assets - Cache First
-  else {
-    event.respondWith(cacheFirstStrategy(request));
+
+  // Navigation requests (SPA routing / page reloads) -> try network then cache fallback
+  if (request.mode === 'navigate' || (request.method === 'GET' && url.pathname === '/')) {
+    event.respondWith((async () => {
+      try {
+        // Try navigation preload response first
+        const preload = await event.preloadResponse;
+        if (preload) return preload;
+
+        const response = await fetch(request);
+        const cache = await caches.open(RUNTIME_CACHE);
+        cache.put(request, response.clone()).catch(() => {});
+        return response;
+      } catch (err) {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match('/index.html') || await cache.match(request, { ignoreSearch: true });
+        if (cached) return cached;
+        return new Response('<h1>Offline</h1>', { headers: { 'Content-Type': 'text/html' }, status: 503 });
+      }
+    })());
+    return;
   }
+
+  // Other requests -> cache-first then network with runtime caching
+  event.respondWith(cacheFirstStrategy(request));
 });
 
 // Estrategia Cache First
@@ -165,9 +193,106 @@ self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-pedidos') {
     event.waitUntil(syncPedidos());
   }
+  if (event.tag === 'sync-pedidos' || event.tag === 'sync-pending-tasks') {
+    event.waitUntil((async () => {
+      await syncPedidos();
+      await processPendingTasksFromIDB();
+    })());
+  }
 });
 
 async function syncPedidos() {
   console.log('✓ Sincronizando pedidos en background...');
   // Lógica de sincronización
+}
+
+// --- IDB helpers inside Service Worker ---
+function swOpenDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('examen-pwa-db', 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('pendingTasks')) {
+        db.createObjectStore('pendingTasks', { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function swGetAllTasks(){
+  const db = await swOpenDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('pendingTasks', 'readonly');
+    const store = tx.objectStore('pendingTasks');
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function swRemoveTask(id){
+  const db = await swOpenDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('pendingTasks', 'readwrite');
+    const store = tx.objectStore('pendingTasks');
+    store.delete(id);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function processPendingTasksFromIDB(){
+  try {
+    const tasks = await swGetAllTasks();
+    if (!tasks || tasks.length === 0) return;
+    for (const task of tasks) {
+      try {
+        await executeTaskInSW(task);
+        await swRemoveTask(task.id);
+        // Optionally notify clients
+        const clients = await self.clients.matchAll({ includeUncontrolled: true });
+        clients.forEach(c => c.postMessage({ type: 'task-synced', id: task.id }));
+      } catch (e) {
+        // increment retries or leave for next sync
+        console.warn('SW: failed to sync task', task.id, e && e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('SW: error processing pending tasks', e && e.message);
+  }
+}
+
+async function executeTaskInSW(task){
+  const action = task.action;
+  const maybe = task.data || {};
+  const endpoint = maybe.endpoint || '/productos';
+  let url = endpoint;
+  if (String(endpoint).startsWith('/api')) url = `${self.location.origin}${endpoint}`;
+  else url = `${self.location.origin}/api${endpoint}`;
+
+  const headers = { 'Content-Type': 'application/json' };
+
+  switch (action) {
+    case 'CREATE': {
+      const body = JSON.stringify((maybe.data) ? maybe.data : maybe);
+      const resp = await fetch(url, { method: 'POST', headers, body });
+      if (!resp.ok) throw new Error('CREATE failed in SW');
+      return await resp.json();
+    }
+    case 'UPDATE': {
+      const body = JSON.stringify((maybe.data) ? maybe.data : maybe);
+      const resp = await fetch(url, { method: 'PUT', headers, body });
+      if (!resp.ok) throw new Error('UPDATE failed in SW');
+      return await resp.json();
+    }
+    case 'DELETE': {
+      const resp = await fetch(url, { method: 'DELETE', headers });
+      if (!resp.ok) throw new Error('DELETE failed in SW');
+      return await resp.json();
+    }
+    default:
+      throw new Error('Unknown action in SW');
+  }
 }

@@ -57,6 +57,24 @@ class OfflineManager {
         this.handleOnline();
       }
     });
+
+    // Escuchar mensajes desde el Service Worker (tareas sincronizadas en background)
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
+        navigator.serviceWorker.addEventListener('message', (ev) => {
+          try {
+            const msg = ev.data || {};
+            if (msg && msg.type === 'task-synced') {
+              // Remover tarea de la cola local y refrescar UI
+              this.removePendingTask(msg.id);
+              if (window.ui && typeof window.ui.refreshPendingIndicators === 'function') {
+                window.ui.refreshPendingIndicators();
+              }
+            }
+          } catch (e) {}
+        });
+      }
+    } catch (e) {}
   }
 
   // Monitor activo para detectar transiciones de offline -> online
@@ -126,6 +144,22 @@ class OfflineManager {
 
     // Mostrar con estado de espera
     this.showTaskStatusInUI(task);
+
+    // Persistir en IndexedDB si está disponible para que el Service Worker pueda sincronizar
+    try {
+      if (window.idbTasks && typeof window.idbTasks.addTask === 'function') {
+        window.idbTasks.addTask(task).catch(() => {});
+      }
+    } catch (e) {}
+
+    // Intentar registrar Background Sync si está disponible
+    try {
+      if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        navigator.serviceWorker.ready.then(reg => {
+          try { reg.sync.register('sync-pending-tasks'); } catch (e) { /* ignore */ }
+        }).catch(() => {});
+      }
+    } catch (e) {}
 
     return task.id;
   }
@@ -266,12 +300,38 @@ class OfflineManager {
   }
 
   savePendingTasks() {
-    localStorage.setItem('pendingTasks', JSON.stringify(this.pendingTasks));
+    try { localStorage.setItem('pendingTasks', JSON.stringify(this.pendingTasks)); } catch (e) {}
+    // also ensure IDB is in sync
+    try {
+      if (window.idbTasks && typeof window.idbTasks.addTask === 'function') {
+        // Upsert all tasks
+        this.pendingTasks.forEach(t => {
+          try { window.idbTasks.addTask(t).catch(() => {}); } catch(e){}
+        });
+      }
+    } catch (e) {}
   }
 
   loadPendingTasks() {
-    const stored = localStorage.getItem('pendingTasks');
-    this.pendingTasks = stored ? JSON.parse(stored) : [];
+    try {
+      const stored = localStorage.getItem('pendingTasks');
+      this.pendingTasks = stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      this.pendingTasks = [];
+    }
+
+    // If IDB available, load from there and merge
+    try {
+      if (window.idbTasks && typeof window.idbTasks.getAllTasks === 'function') {
+        window.idbTasks.getAllTasks().then(tasks => {
+          const map = new Map(this.pendingTasks.map(t => [String(t.id), t]));
+          tasks.forEach(t => { map.set(String(t.id), t); });
+          this.pendingTasks = Array.from(map.values());
+          // persist merged result back to localStorage
+          try { localStorage.setItem('pendingTasks', JSON.stringify(this.pendingTasks)); } catch (e) {}
+        }).catch(() => {});
+      }
+    } catch (e) {}
   }
 
   getPendingTasks() {
