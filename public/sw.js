@@ -16,9 +16,7 @@ const STATIC_ASSETS = [
   '/js/ui.js',
   '/js/app.js',
   '/img/product-icon.svg',
-  '/img/product-splash.svg',
-  '/img/icon-192.png',
-  '/img/icon-512.png'
+  '/img/product-splash.svg'
 ];
 
 // Instalar Service Worker
@@ -182,8 +180,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'Notificación';
   const options = {
     body: data.body || 'Tienes una nueva notificación',
-    icon: '/img/icon-192.png',
-    badge: '/img/icon-192.png',
+    icon: '/img/product-icon.svg',
+    badge: '/img/product-icon.svg',
     tag: 'notification',
   };
 
