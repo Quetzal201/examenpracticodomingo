@@ -10,29 +10,23 @@
   "theme_color": "#1a1a1a",
   "icons": [
     {
-      "src": "/img/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "/img/product-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "/img/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/img/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "/img/product-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "maskable"
     }
   ],
   "screenshots": [
     {
-      "src": "/img/screenshot-1.png",
-      "sizes": "540x720",
-      "type": "image/png",
+      "src": "/img/product-splash.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "form_factor": "narrow"
     }
   ],
@@ -44,8 +38,8 @@
       "url": "/pedidos",
       "icons": [
         {
-          "src": "/img/icon-192.png",
-          "sizes": "192x192"
+          "src": "/img/product-icon.svg",
+          "sizes": "any"
         }
       ]
     }
